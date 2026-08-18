@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+.env
+node_modules/
+dist/
+build/
+staticfiles/
+media/
+.DS_Store
+*.sqlite3
+postgres-data/backend/venv/
+
+backend/venv/
+
+backend/venv/
+
+backend/venv/
