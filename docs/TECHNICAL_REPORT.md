@@ -722,3 +722,51 @@ The project focuses not only on feature development but also on:
 The DID/VC, eKYC, payment and remittance components are intentionally presented as prototypes rather than production financial or identity infrastructure.
 
 This makes JVCP suitable as a technical proof-of-concept demonstrating product engineering decisions, security thinking, API development, and the ability to turn an early-stage cross-border digital-service concept into a working prototype.
+
+**Current limitation:** the rate limiter uses Django's default local-memory cache
+(no explicit `CACHES` backend is configured, despite Redis being available in the
+stack). This means the rate-limit counter resets on every backend restart and would
+not be shared correctly across multiple worker processes in a multi-process
+production deployment (e.g. multiple Gunicorn workers), since each process keeps
+its own in-memory counter. A production hardening step would be to point
+`django-ratelimit` at the existing Redis instance via a proper `CACHES` configuration,
+so the limit is enforced consistently across all workers and survives restarts.
+
+## 30. Real-World Issues Found and Fixed During Deployment
+
+Moving from local development to a live AWS deployment surfaced three concrete
+issues, each diagnosed and resolved during this project:
+
+### 30.1 Password field rendered as plaintext
+
+The password `<input>` in the login/registration form used a mistyped attribute
+(`ttype` instead of `type`), which React silently ignored. The field therefore had
+no `type` attribute and defaulted to plain text, meaning every user's password was
+visible on screen while typing, in both login and registration modes. Fixed by
+correcting the attribute name and verified by confirming the field renders masked
+and that the existing "show password" toggle still functions correctly.
+
+### 30.2 CORS origin mismatch silently blocked all authentication
+
+After changing how the frontend was served, every login, registration, and Google
+OAuth attempt failed with a generic error. Backend logs showed only CORS preflight
+(`OPTIONS`) requests succeeding — the actual `POST` requests never reached Django.
+The cause was `CORS_ALLOWED_ORIGINS` in the environment configuration listing an
+origin without a port, while the browser was making requests from a different port,
+which the browser's CORS policy treats as a distinct, disallowed origin. This
+class of failure is easy to misdiagnose as a backend or authentication bug, since
+the error surfaced identically across three unrelated auth flows; the actual signal
+was in the browser's network tab and the absence of the real request in backend
+logs. Fixed by expanding `CORS_ALLOWED_ORIGINS` to include every origin the app is
+actually served from.
+
+### 30.3 IDOR — see Section 19.2
+
+Documented separately as a security design decision, since it was caught and fixed
+before deployment via a dedicated cross-user test rather than discovered live.
+
+These findings reflect a broader lesson: authorization bugs, UI attribute typos, and
+environment-configuration mismatches each produce very different *symptoms* but can
+look identical from a user's perspective ("it doesn't work"). Diagnosing each
+correctly required checking a different layer of the stack — the React DOM output,
+browser network behavior, and server-side request logs, respectively.
