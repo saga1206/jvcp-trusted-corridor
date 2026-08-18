@@ -115,7 +115,7 @@ export default function Login() {
 
         <input
           placeholder="Password"
-          ttype={showPassword ? 'text' : 'password'}
+          type={showPassword ? 'text' : 'password'}
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           required
