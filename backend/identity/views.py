@@ -1,6 +1,7 @@
 from django.contrib.auth.models import User
 from django.conf import settings
 from django.core.mail import send_mail
+from django.db.models import Q
 from django.urls import reverse
 from django.utils import timezone
 from django_ratelimit.decorators import ratelimit
@@ -32,6 +33,18 @@ class RegisterView(generics.CreateAPIView):
     permission_classes = [permissions.AllowAny]
 
     def create(self, request, *args, **kwargs):
+        # If a previous registration with this username/email was never verified,
+        # remove the stale, unverified account so the person can register again
+        # instead of being permanently blocked by a "already exists" error.
+        username = (request.data.get('username') or '').strip()
+        email = (request.data.get('email') or '').strip().lower()
+
+        if username or email:
+            User.objects.filter(
+                Q(username__iexact=username) | Q(email__iexact=email),
+                is_active=False,
+            ).delete()
+
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
