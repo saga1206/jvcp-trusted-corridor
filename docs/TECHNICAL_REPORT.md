@@ -770,3 +770,88 @@ environment-configuration mismatches each produce very different *symptoms* but 
 look identical from a user's perspective ("it doesn't work"). Diagnosing each
 correctly required checking a different layer of the stack — the React DOM output,
 browser network behavior, and server-side request logs, respectively.
+
+## 31. Additional Deployment Findings (AWS EC2)
+
+Deploying to a live AWS EC2 instance — separate from local Docker Compose — surfaced
+several further issues, each real and each resolved:
+
+### 31.1 Database credential mismatch between compose files
+
+The project has two Docker Compose files: `docker-compose.yml` (local development,
+using `npm run dev` for the frontend and `runserver` for the backend) and
+`docker-compose.prod.yml` (production, using Gunicorn). Both hardcode
+`POSTGRES_PASSWORD` directly in the `db` service definition rather than reading it
+from `.env`, while the backend's `DATABASE_URL` in `.env` referenced a different
+password. Since Postgres only sets its password on first initialization of the data
+volume, the running database's actual password no longer matched what the backend
+was configured to send, producing a silent `OperationalError` on every
+database-touching request. Diagnosed by temporarily enabling `DEBUG=True` to read
+the full Django error page, then resolved by resetting the database user's password
+to match via `ALTER USER`. A related, more subtle risk was surfaced in the process:
+running both compose files against the same default Docker Compose project name
+caused an unintended `docker compose up` invocation (using the dev file) to silently
+recreate the running production `db`, `backend`, and `frontend` containers with
+dev-mode configuration — replacing a live Gunicorn backend with `runserver`. This is
+now a documented operational hazard: `-f docker-compose.prod.yml` must be passed
+explicitly and consistently, or the two environments should be given distinct
+Compose project names.
+
+### 31.2 Missing database migrations and superuser on first deploy
+
+A fresh production database has no tables until `migrate` is run — including
+Django's own `auth_user` table. The symptom was a `ProgrammingError: relation
+"auth_user" does not exist` on registration, easily mistaken for an application bug
+if the underlying cause (a never-initialized database) isn't considered. Resolved by
+running `manage.py migrate` and `manage.py createsuperuser` as an explicit,
+now-documented first-deploy step.
+
+### 31.3 Static files not served (Django admin unstyled)
+
+`collectstatic` writes to a path inside the backend container's filesystem, but the
+Nginx container reads static assets from a separate host directory mounted
+read-only. Without a shared volume between the two, `collectstatic` output never
+reached the location Nginx was actually serving from, leaving the Django admin
+interface completely unstyled despite `collectstatic` reporting success. Resolved in
+the short term by copying the container's `staticfiles` directory out to the host
+path Nginx expects; the durable fix — a shared named volume between the `backend`
+and `nginx` services for the staticfiles path — is noted as follow-up work so this
+does not silently break again after the next rebuild.
+
+### 31.4 Layered timeout misconfiguration masked the true error
+
+Long-running AI itinerary generation requests failed intermittently, and the failure
+mode was misleading: Gunicorn's default 30-second worker timeout, Nginx's default
+60-second `proxy_read_timeout`, and the Gemini SDK's internal retry logic all sat in
+front of the actual error, so early symptoms looked like an infrastructure timeout
+rather than an application-level failure. Gunicorn's timeout was raised to 120s
+(`--timeout 120`) and Nginx's `/api/` location was given matching
+`proxy_read_timeout` / `proxy_connect_timeout` / `proxy_send_timeout` values, which
+was the correct fix for genuinely slow requests but did not fully explain requests
+that failed even at small input sizes.
+
+### 31.5 Root cause: Gemini free-tier quota exhaustion
+
+Bypassing Django and calling `generate_content` directly against the Gemini API
+revealed the true cause: `429 RESOURCE_EXHAUSTED`, the free tier's daily cap of 20
+`generateContent` requests per model per project. The Gemini SDK's built-in retry
+logic (via `tenacity`) was silently retrying on this error rather than surfacing it
+immediately, which is what made repeated failures look like slow timeouts or
+"hanging" requests rather than a quota limit. This was confirmed as the actual
+cause, not an application defect, by issuing a minimal direct API call outside of
+Django and reading the raw error response. **Recommendation:** for any deployment
+expecting sustained AI-planner usage, enable billing on the Gemini API project to
+raise the quota, and consider surfacing quota/rate-limit errors distinctly to the
+user in the UI rather than a generic failure message, so this class of issue is
+self-diagnosing in production rather than requiring backend log access.
+
+### 31.6 Broader lesson
+
+Several of these issues shared a common shape: a failure surfaced at one layer
+(a generic "Something went wrong" in the UI, a `500`, a `504`) while the actual
+cause sat one or more layers deeper (database credentials, missing migrations, a
+missing shared volume, an upstream quota). In each case, the fix required
+deliberately peeling back a layer — enabling `DEBUG=True` temporarily, bypassing
+Django to call Gemini directly, inspecting the Nginx config actually running inside
+the container rather than assuming the edited file had taken effect — rather than
+guessing based on the symptom alone.
