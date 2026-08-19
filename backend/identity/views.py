@@ -42,7 +42,7 @@ class RegisterView(generics.CreateAPIView):
         verification = EmailVerificationToken.objects.create(user=user)
 
         verification_url = (
-            f"http://localhost:5174/verify-email/{verification.token}/"
+            f"{settings.FRONTEND_URL}/verify-email/{verification.token}/"
         )
 
         send_mail(

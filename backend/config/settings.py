@@ -19,6 +19,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 DEBUG = config('DEBUG', default=False, cast=bool)
 SECRET_KEY = config('SECRET_KEY')
 GOOGLE_CLIENT_ID = config('GOOGLE_CLIENT_ID', default='')
+FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:5174')
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='').split(',')
 
 INSTALLED_APPS = [
