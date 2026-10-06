@@ -1,5 +1,13 @@
 # JVCP — Japan ⇄ Vietnam Trusted Corridor Platform
 
+🔗 **Live Demo:** [http://13.235.69.141.nip.io/login](http://13.235.69.141.nip.io/login)
+
+[![Live Demo](https://img.shields.io/badge/Live-Demo-brightgreen?style=for-the-badge)](http://13.235.69.141.nip.io/login)
+
+> A multilingual (VI/JA/EN) platform with an AI assistant, itinerary planner, verified providers, payments and an audit trail. Built with Django, React and Docker.
+
+**Demo login:** `hoggrider` / `sana9599`
+
 A prototype digital-trust platform connecting Japanese and Vietnamese users through
 verified identity, secure payments, and trusted cross-border services — built as a
 portfolio project for the Product Engineering Internship at goen LLC (Tokyo).
